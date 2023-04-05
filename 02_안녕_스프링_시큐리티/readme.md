@@ -155,3 +155,300 @@ curl -k https://localhost:8080/hello
 <br>
 
 ## IV. 기본 구성 재정의
+
+**_재정의 옵션을 알아야 하는 이유_**  
+: 맞춤형 구현을 연결하고, 애플리케이션에 맞게 보안을 적용하는 방법이기 때문
+
+> ### ❶ UserDetailsService 구성 요소 재정의
+
+- UserDetailsService는 `인증 프로세스`에 이용됨
+- 재정의 → 직접 구현 or Spring Security에 있는 구현 이용
+
+```java
+@Configuration
+public class ProjectConfig {
+    @Bean
+    public UserDetailsService userDetailsService() {
+        return new InMemoryUserDetailsManager();
+    }
+}
+
+```
+
+- 구현체인 `InMemoryUserDetailsManager` 이용
+  - 운영 단계 애플리케이션을 위한 것은 아님
+- 위와 같이 설정 시, 더 이상 console에 자동 생성된 `암호가 출력되지 않음`
+- But. 아직 엔드포인트 접근 불가능
+  - `사용자`가 없음
+  - `PasswordEncoder`가 없음
+
+<br>
+
+```java
+@Configuration
+public class ProjectConfig {
+    @Bean
+    public UserDetailsService userDetailsService() {
+        InMemoryUserDetailsManager userDetailsService = new InMemoryUserDetailsManager();
+
+        UserDetails user = User.withUsername("komment")
+                .password("12345")
+                .authorities("read")
+                .build();
+        userDetailsService.createUser(user);
+
+        return userDetailsService;
+    }
+}
+```
+
+**_자격 증명이 있는 사용자 생성_**
+
+- `사용자 이름`과 `암호`, 하나 이상의 `권한`을 지정해줘야 함
+- 권한 → 해당 사용자에게 `허용된 작업`이며, 아무 문자열이나 지정 가능
+- `PasswordEncoder`가 아직 없기에 엔드포인트 호출 불가능
+
+<br>
+
+```java
+@Configuration
+public class ProjectConfig {
+    . . .
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return NoOpPasswordEncoder.getInstance();
+    }
+}
+```
+
+**_PasswordEncoder 재정의_**
+
+- 기본 UserDetailsService 사용 시 → PasswordEncoder `자동 구성`
+- UserDatailsService 재정의 → PasswordEncoder도 `다시 선언`
+  - Spring Security가 암호 관리법을 몰라 Error를 던짐
+  - `There is no PasswordEncoder mapped for the id "null"`
+- 예제에서는 `NoOpPasswordEncoder` 클래스의 정적 팩터리 메서드로 해결
+  - 암호를 `일반 텍스트`로 처리
+  - String 클래스의 `equals()` 메서드로 문자열 비교
+  - 이를 고려해 `@Deprecated` 지정돼 있음
+
+다음과 같이 curl로 테스트 해볼 수 있다.
+
+```shell
+curl -u komment:12345 http://localhost:8080/hello
+```
+
+<br>
+
+> ### ❷ 엔드포인트 권한 부여 구성 재정의
+
+**_WebSecurityConfigurerAdapter 클래스의 확장_**
+
+- `configure(HttpSecurity http)` 메서드 재정의
+- 인증 방식 변경
+- 지정한 엔드포인트 보호
+- 보안이 필요한 엔드포인트에 다른 권한 부여 규칙 선택
+
+```java
+public class ProjectConfig extends WebSecurityConfigurerAdapter {
+  . . .
+
+  @Override
+  protected void configure(HttpSecurity http) throws Exception {
+    http.httpBasic();
+    http.authorizeRequests()
+        .anyRequest().authenticated();
+      //.anyRequest().permitAll();
+  }
+}
+```
+
+- 기본 동작과 동일한 엔드포인트 권한 부여 구성
+- `authenticated()` : 인증이 돼야 접근 가능
+- `permitAll()` : 인증 없이 접근 가능
+
+<br>
+
+**_현재는 WebSecurityConfigurerAdapter 클래스가 @Deprecated 상태_**
+
+→ 상속 후 오버라이딩 아닌 모두 `Bean`으로 등록하는 방식으로 바뀜
+
+```java
+@Configuration
+public class ProjectConfig {
+    . . .
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+                .httpBasic()
+                .and()
+                .authorizeHttpRequests()
+                    .anyRequest().authenticated();
+                  //.anyRequest().permitAll();
+        return http.build();
+    }
+}
+```
+
+<br>
+
+> ### ❸ 다른 방법으로 구성 설정
+
+```java
+@Configuration
+public class ProjectConfig extends WebSecurityConfigurerAdapter {
+
+    @Override
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+        var userDetailService = new InMemoryUserDetailsManager();
+
+        var user = User.withUsername("komment")
+                .password("12345")
+                .authorities("read")
+                .build();
+
+        userDetailService.createUser(user);
+
+        auth.userDetailsService(userDetailService)
+                .passwordEncoder(NoOpPasswordEncoder.getInstance());
+    }
+}
+```
+
+- `configure()` 안에서 `UserDetailsService` 선언
+- `AuthenticationManagerBuilder` 클래스 활용
+
+```java
+@Configuration
+public class ProjectConfig extends WebSecurityConfigurerAdapter {
+
+  . . .
+
+  @Override
+  protected void configure(HttpSecurity http) throws Exception {
+    http.httpBasic();
+    http.authorizeRequests()
+                .anyRequest().authenticated();
+  }
+}
+```
+
+- WebSecurityConfigurerAdapter 클래스는 오버로드 된 세 가지의 configure() 메서드가 있음
+
+<br>
+
+> - Bean 등록 방법 → 필요할 가능성이 있는 다른 클래스에 값 주입 가능
+> - WebSecurityConfigurerAdapter → 주입이 필요없을 시 좋음
+> - 구성을 혼합하여 쓰면 유지보수가 힘들어짐
+
+<br>
+
+> ### ❹ AuthenticationProvider 구현 재정의
+
+**_AuthenticationProvider_**
+
+- 인증 공급자
+- 인증 논리 구현
+- UserDetailsService나 PasswordEncoder 등의 구성요소에 작업 위임
+
+```java
+@Component
+public class CustomAuthenticationProvider implements AuthenticationProvider {
+  // 인증 논리를 추가할 위치
+  @Override
+  public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+      // Principal 인터페이스의 getName()메소드를  Authentication에서 상속받음
+      String username = authentication.getName();
+      String password = String.valueOf(authentication.getCredentials());
+
+
+      // UserDetailsService 및 PasswordEncoder의 책임을 대체
+      if("komment".equals(username) && "12345".equals(password)) {
+          return new UsernamePasswordAuthenticationToken(username,  password, Arrays.asList());
+      } else {
+          throw new AuthenticationCredentialsNotFoundException("Error in authentication!");
+        }
+    }
+
+    // Authentication 형식의 구현을 추가할 위치
+    @Override
+    public boolean supports(Class<?> authentication) {
+      return UsernamePasswordAuthenticationToken.class
+          .isAssignableFrom(authentication);
+    }
+}
+```
+
+→ 고유한 AuthenticationProvider 구현으로 인증 논리 대체
+
+<br>
+
+```java
+@Configuration
+public class ProjectConfig extends WebSecurityConfigurerAdapter {
+
+    private CustomAuthenticationProvider authenticationProvider;
+
+    public ProjectConfig(CustomAuthenticationProvider authenticationProvider) {
+        this.authenticationProvider = authenticationProvider;
+    }
+
+    @Override
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+        auth.authenticationProvider(authenticationProvider);
+    }
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.httpBasic();
+        http.authorizeRequests()
+                .anyRequest().authenticated();
+    }
+}
+```
+
+→ 커스텀한 AuthenticationProvider 등록
+
+<br>
+
+> ### ❺ 구성 클래스의 책임 분리
+
+- OOP에 맞게 한 클래스는 `하나의 책임`을 맡도록 하는 것이 좋음
+- 두 클래스 모두 WebSecurityConfigurerAdapter를 확장할 수 없음
+
+```java
+// UserDetailsService와 PasswordEncoder를 정의
+@Configuration
+public class UserManagementConfig {
+    @Bean
+    public UserDetailsService userDetailsService(){
+        var userDetailsService = new InMemoryUserDetailsManager();
+
+        var user = User.withUsername("komment")
+                .password("12345")
+                .authorities("read")
+                .build();
+
+        userDetailsService.createUser(user);
+        return userDetailsService;
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder(){
+        return NoOpPasswordEncoder.getInstance();
+    }
+}
+
+// 엔드포인트 관리
+@Configuration
+public class WebAuthorizationConfig extends WebSecurityConfigurerAdapter {
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.httpBasic();
+        http.authorizeRequests()
+                .anyRequest().authenticated();
+    }
+}
+```
