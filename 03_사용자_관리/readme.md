@@ -204,3 +204,199 @@ public class SecurityUser implements UserDetails {
 <br>
 
 ## III. 스프링 시큐리티가 사용자를 관리하는 방법 지정
+
+- 자격증명을 비교할 때 어디에서 가져오는지?
+- 새 사용자를 추가하거나 기존 사용자를 변경할 때 어떻게 하는지?
+
+<br>
+
+> ### i) UserDetailsService 계약의 이해
+
+```java
+public interface UserDetailsService {
+
+    UserDetails loadUserByUsername(String username) throws UsernameNotFoundException;
+}
+```
+
+- `loadUserByUsername()` → 주어진 사용자 이름을 가진 사용자의 세부 정보를 얻음
+- Username은 고유하다고 가정
+- 존재하지 않는 Username일 때 `throw UsernameNotFoundException`
+
+<p align=center>
+    <img src='../resources/03/loadUserByUsername.png'>
+</p>
+
+<br>
+
+> ### ii) UserDetailsService 계약 구현
+
+```java
+package com.ch3.ssia;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+import java.util.List;
+
+@RequiredArgsConstructor
+public class User implements UserDetails {
+    private final String username;
+    private final String password;
+    private final String authority;
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return List.of(() -> authority);
+    }
+
+    @Override
+    public String getPassword() {
+        return password;
+    }
+
+    @Override
+    public String getUsername() {
+        return username;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+}
+```
+
+→ UserDetails 정의
+
+```java
+@RequiredArgsConstructor
+public class InMemoryUserDetailsService implements UserDetailsService {
+    private final List<UserDetails> users;
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        return users.stream()
+                .filter(u -> u.getUsername().equals(username))
+                .findFirst()
+                .orElseThrow(() -> new UsernameNotFoundException("User Not Found"));
+    }
+}
+```
+
+→ loadUserByUsername() 메서드 재구성
+
+```java
+@Configuration
+public class SecurityConfig {
+    @Bean
+    public UserDetailsService userDetailsService() {
+        return new InMemoryUserDetailsService(List.of(
+                new User("komment",
+                        "12345",
+                        "read")));
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return NoOpPasswordEncoder.getInstance();
+    }
+}
+```
+
+→ 구성 클래스 빈 추가 및 사용자 한명 등록
+
+<br>
+
+> ### iii) UserDetailsManager 계약 구현
+
+```java
+public interface UserDetailsManager extends UserDetailsService {
+    void createUser(UserDetails user);
+    void updateUser(UserDetails user);
+    void deleteUser(String username);
+
+    void changePassword(String oldPassword, String newPassword);
+    boolean userExists(String username);
+}
+```
+
+- 사용자 관리 기능 → 사용자 추가, 삭제 등등
+- UserDetailsService 계약 확장 및 메서드 추가
+
+<br>
+
+**_JdbcUserDetailsManager_**
+
+- SQL DB에 저장된 사용자를 관리
+- JDBC를 통해 DB에 직접 연결
+
+<p align=center>
+    <img src='../resources/03/jdbcUserDetailsManager.png'>
+</p>
+
+1. client의 전송요청을 인증 필터가 가로챔
+2. 인증 책임이 인증 관리자에 위임
+3. 인증 관리자가 인증 공급자 이용
+4. 안중 공급자가 JdbcUserDetailsManager 호출 → 사용자 세부정보 확인
+5. JdbcUserDetailsManager가 DB에서 사용자를 찾고 세부정보 리턴
+6. 사용자 발견 → 암호 인코더가 암호 확인
+7. 인증 성공 → 인증된 엔티티에 대한 세부정보가 세션 텍스트에 저장
+8. 요청이 컨트롤러에 전달
+
+<br>
+
+```java
+@Configuration
+public class SecurityConfig {
+    @Bean
+    public UserDetailsService userDetailsService(DataSource dataSource) {
+        return new JdbcUserDetailsManager(dataSource);
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return NoOpPasswordEncoder.getInstance();
+    }
+}
+```
+
+→ 다음과 같이 데이터 원본을 자동 연결할 수 있음
+
+```java
+@Configuration
+public class SecurityConfig {
+    @Bean
+    public UserDetailsService userDetailsService(DataSource dataSource) {
+        String userByUsernameQuery = "select username, password, enabled from users where username = ?";
+        String authsByUserQuery = "select username, authority from spirng.authorities where username = ?";
+
+        UserDetailsManager userDetailsManager = new JdbcUserDetailsManager(dataSource);
+        userDetailsManager.setUserByUsernameQuery(userByUsernameQuery);
+        userDetailsManager.setAuthoritiesByUsernameQuery(authsByUserQuery);
+
+        return userDetailsManager;
+    }
+
+    . . .
+}
+```
+
+→ 다음과 같이 이용 쿼리도 구성 가능
