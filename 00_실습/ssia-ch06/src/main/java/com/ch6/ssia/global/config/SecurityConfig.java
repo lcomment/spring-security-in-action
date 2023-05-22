@@ -13,7 +13,6 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration
 @RequiredArgsConstructor
 public class SecurityConfig {
-    private final MemberDetailsService memberDetailsService;
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
@@ -23,10 +22,6 @@ public class SecurityConfig {
                 .authorizeHttpRequests((auth) ->
                         auth.anyRequest().authenticated()
                 )
-                .authenticationProvider(new AuthenticationProviderService(
-                        memberDetailsService,
-                        bCryptPasswordEncoder(),
-                        sCryptPasswordEncoder()))
                 .build();
     }
 

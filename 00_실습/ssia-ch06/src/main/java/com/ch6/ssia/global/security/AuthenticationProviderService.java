@@ -13,6 +13,7 @@ import org.springframework.security.crypto.scrypt.SCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @RequiredArgsConstructor
+@Service
 public class AuthenticationProviderService implements AuthenticationProvider {
     private final MemberDetailsService memberDetailsService;
     private final BCryptPasswordEncoder bCryptPasswordEncoder;
