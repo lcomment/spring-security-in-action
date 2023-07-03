@@ -301,6 +301,10 @@ public class SecurityConfig {
 }
 ```
 
+- 로그인하지 않고 아무 경로에 접근하려고 하면 자동으로 로그인 페이지로 `리다이렉션`
+- formLogin()
+  - FormLoginConfigurer<HttpSecurity> 형식의 객체 반환
+
 <br>
 
 **_AuthenticationSuccessHandler 커스텀_**
