@@ -44,7 +44,7 @@ CorsConfigurationSource corsConfigurationSource() {
 
 <br>
 
-## II. 체인에서 기죤 필터 앞에 필터 추가
+## II. 체인에서 기존 필터 앞에 필터 추가
 
 > ### i) 필터 생성
 
