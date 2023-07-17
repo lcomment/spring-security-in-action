@@ -8,7 +8,7 @@
 
 ## I. 스프링 시큐리티 아키테처의 필터 구현
 
-- javax.servlet 패키지의 `Filte` 인터페이스를 구현
+- javax.servlet 패키지의 `Filter` 인터페이스를 구현
   - `doFilter()` 메서드 재정의
   - `ServletRequest`: HTTP 요청, 요청에 대한 세부 정보를 얻음
   - `ServletResponse`: HTTP 응답, 필터체인에서 응답 변경
